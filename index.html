@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>map-quiz</title>
+    <script>
+      if (typeof __firebase_config === 'undefined') {
+        var __firebase_config = JSON.stringify({
+          apiKey: 'demo-key',
+          authDomain: 'demo.firebaseapp.com',
+          projectId: 'demo-project',
+          appId: '1:123456:web:demo',
+        })
+      }
+      if (typeof __app_id === 'undefined') {
+        var __app_id = 'world-quiz-smooth'
+      }
+      if (typeof __initial_auth_token === 'undefined') {
+        var __initial_auth_token = ''
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
