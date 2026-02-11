@@ -669,7 +669,7 @@ const App = () => {
                   data-country-id={path.id}
                   fill={fill}
                   stroke={stroke}
-                  strokeWidth={0.5 / transform.scale}
+                  strokeWidth={1.2 / transform.scale}
                   className="cursor-pointer"
                   style={{ transition: 'fill 0.15s ease-out' }}
                   onClick={(e) => {
