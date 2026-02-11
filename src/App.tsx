@@ -471,7 +471,7 @@ const App = () => {
     const svgX = (cx / rect.width) * (800 / transform.scale) + (-transform.x / transform.scale)
     const svgY = (cy / rect.height) * (400 / transform.scale) + (-transform.y / transform.scale)
     
-    const zoomFactor = Math.exp(-e.deltaY * 0.001)
+    const zoomFactor = Math.exp(-e.deltaY * 0.003)
     setTransform((prev) => {
       const nextScale = Math.max(1, Math.min(20, prev.scale * zoomFactor))
       
