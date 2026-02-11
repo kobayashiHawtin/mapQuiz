@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['vite.svg'],
+      includeAssets: ['favicon.ico'],
       manifest: {
         name: 'GeoMind',
         short_name: 'GeoMind',
@@ -17,12 +17,13 @@ export default defineConfig({
         theme_color: '#2563eb',
         background_color: '#ffffff',
         display: 'standalone',
-        start_url: '/',
+        scope: '/mapQuiz/',
+        start_url: '/mapQuiz/',
         icons: [
           {
-            src: '/vite.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: '/mapQuiz/favicon.ico',
+            sizes: '32x32',
+            type: 'image/x-icon',
           },
         ],
       },
