@@ -563,7 +563,7 @@ const App = () => {
             transition: pointers.current.size === 0 ? 'transform 0.2s ease-out' : 'none',
           }}
         >
-          <svg viewBox="0 0 800 400" className="w-full h-full drop-shadow-sm">
+          <svg viewBox="0 0 800 400" className="w-full h-full drop-shadow-sm" shapeRendering="geometricPrecision">
             <rect x="-1000" y="-1000" width="3000" height="3000" fill="#d4e9f7" />
             {pathData.map((path) => {
               const targetId = currentCountry ? getCountryId(currentCountry.properties) : undefined
@@ -572,7 +572,6 @@ const App = () => {
 
               let fill = '#f0f4f8'
               const stroke = '#cbd5e1'
-              const strokeWidth = 0.5 / transform.scale
 
               if (feedback) {
                 if (isTarget) fill = '#22c55e'
@@ -588,7 +587,8 @@ const App = () => {
                   data-country-id={path.id}
                   fill={fill}
                   stroke={stroke}
-                  strokeWidth={strokeWidth}
+                  strokeWidth={0.5}
+                  vectorEffect="non-scaling-stroke"
                   className="cursor-pointer"
                   style={{ transition: 'fill 0.15s ease-out' }}
                   onClick={(e) => {
