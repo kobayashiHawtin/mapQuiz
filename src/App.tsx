@@ -557,21 +557,21 @@ const App = () => {
         onWheel={handleWheel}
       >
         <div
-          className="w-full h-full origin-top-left"
+          className="w-full h-full origin-top-left will-change-transform"
           style={{
             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
             transition: pointers.current.size === 0 ? 'transform 0.2s ease-out' : 'none',
           }}
         >
           <svg viewBox="0 0 800 400" className="w-full h-full drop-shadow-sm">
-            <rect x="-1000" y="-1000" width="3000" height="3000" fill="#e0f2fe" />
+            <rect x="-1000" y="-1000" width="3000" height="3000" fill="#d4e9f7" />
             {pathData.map((path) => {
               const targetId = currentCountry ? getCountryId(currentCountry.properties) : undefined
               const isTarget = path.id === targetId
               const isSelected = path.id === selectedId
 
-              let fill = '#ffffff'
-              const stroke = '#e2e8f0'
+              let fill = '#f0f4f8'
+              const stroke = '#cbd5e1'
               const strokeWidth = 0.5 / transform.scale
 
               if (feedback) {
@@ -589,7 +589,8 @@ const App = () => {
                   fill={fill}
                   stroke={stroke}
                   strokeWidth={strokeWidth}
-                  className="transition-colors duration-150 cursor-pointer"
+                  className="cursor-pointer"
+                  style={{ transition: 'fill 0.15s ease-out' }}
                   onClick={(e) => {
                     e.stopPropagation()
                     handleCountryClick(path.id, path.name)
