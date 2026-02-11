@@ -31,6 +31,9 @@ type GeoProperties = {
   ADMIN?: string
   name?: string
   ISO_A3?: string
+  ISO_A2?: string
+  'ISO3166-1-Alpha-2'?: string
+  'ISO3166-1-Alpha-3'?: string
 }
 
 type GeoFeature = {
@@ -83,15 +86,105 @@ const isGeometrySupported = (geometry: RawGeoFeature['geometry']): geometry is G
 
 const hasName = (properties?: GeoProperties) => Boolean(properties?.ADMIN || properties?.name)
 
+const getEnglishName = (properties: GeoProperties) => properties.ADMIN || properties.name || 'Unknown'
+
+const getCountryId = (properties: GeoProperties) =>
+  properties.ISO_A3 || properties['ISO3166-1-Alpha-3'] || properties.name || properties.ADMIN || 'unknown'
+
+const getJapaneseName = (properties: GeoProperties) => {
+  const rawRegion = properties['ISO3166-1-Alpha-2'] || properties.ISO_A2
+  const regionCode = rawRegion?.toUpperCase()
+  if (regionCode && /^[A-Z]{2}$/.test(regionCode) && typeof Intl.DisplayNames !== 'undefined') {
+    const display = new Intl.DisplayNames('ja', { type: 'region' }).of(regionCode)
+    if (display) return display
+  }
+  return getEnglishName(properties)
+}
+
+const extractPoints = (geometry: Geometry) => {
+  if (geometry.type === 'Polygon') return geometry.coordinates.flat()
+  return geometry.coordinates.flatMap((polygon) => polygon.flat())
+}
+
+const buildFallbackHint = (feature: GeoFeature): Hint => {
+  const points = extractPoints(feature.geometry)
+  const name = getJapaneseName(feature.properties)
+  if (points.length === 0) {
+    return {
+      summary: `${name} / 解説準備中`,
+      main_hint: `${name}の解説を表示するにはAIヒントを生成してください。`,
+    }
+  }
+  let minLat = Infinity
+  let maxLat = -Infinity
+  let minLon = Infinity
+  let maxLon = -Infinity
+  for (const [lon, lat] of points) {
+    minLat = Math.min(minLat, lat)
+    maxLat = Math.max(maxLat, lat)
+    minLon = Math.min(minLon, lon)
+    maxLon = Math.max(maxLon, lon)
+  }
+  const centerLat = (minLat + maxLat) / 2
+  const centerLon = (minLon + maxLon) / 2
+  const latLabel = centerLat >= 0 ? '北半球' : '南半球'
+  const lonLabel = centerLon >= 0 ? '東半球' : '西半球'
+  const extentArea = Math.abs((maxLat - minLat) * (maxLon - minLon))
+  const sizeLabel = extentArea < 20 ? '小さめ' : extentArea < 80 ? '中規模' : '広い'
+  const shapeLabel =
+    feature.geometry.type === 'MultiPolygon' && feature.geometry.coordinates.length > 1
+      ? '島が点在する国'
+      : 'ひと続きの陸地を持つ国'
+  return {
+    summary: `${name} / ${latLabel}・${lonLabel} / ${sizeLabel}`,
+    main_hint: `${name}は${latLabel}・${lonLabel}に位置し、${shapeLabel}で、${sizeLabel}な国です。`,
+  }
+}
+
+const isCoordinateHint = (value: string) =>
+  /緯度|経度|北緯|南緯|東経|西経|°/.test(value)
+
+const MAP_WIDTH = 800
+const MAP_HEIGHT = 400
+
+const project = (coords: number[]) => {
+  const lon = coords[0]
+  const lat = coords[1]
+  const x = (lon + 180) * (MAP_WIDTH / 360)
+  const y = (90 - lat) * (MAP_HEIGHT / 180)
+  return [x, y]
+}
+
+const getProjectedBounds = (feature: GeoFeature) => {
+  const points = extractPoints(feature.geometry)
+  if (points.length === 0) return null
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const [lon, lat] of points) {
+    const [x, y] = project([lon, lat])
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+  return { minX, maxX, minY, maxY }
+}
+
 // --- Configuration ---
 const firebaseConfig = JSON.parse(__firebase_config) as FirebaseOptions
 const app = initializeApp(firebaseConfig)
 const auth = getAuth(app)
 const db = getFirestore(app)
 const appId = __app_id ?? 'world-quiz-smooth'
-const apiKey = ''
+// .env 設定方法:
+// 1) プロジェクト直下に .env を作成
+// 2) VITE_GEMINI_API_KEY=あなたのAPIキー を追加
+// 3) 開発サーバー/ビルドを再起動
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY ?? ''
 const hasValidFirebaseKey = Boolean(firebaseConfig?.apiKey) && firebaseConfig.apiKey !== 'demo-key'
-const MODEL_NAME = 'gemini-2.5-flash-preview-09-2025'
+const MODEL_NAME = 'gemini-2.5-flash-lite'
 const GEO_DATA_URL =
   'https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson'
 
@@ -115,6 +208,11 @@ const App = () => {
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
   const lastCenter = useRef<{ x: number; y: number } | null>(null)
   const lastDist = useRef(0)
+  const dragState = useRef<{ start: { x: number; y: number } | null; moved: boolean }>({
+    start: null,
+    moved: false,
+  })
+  const suppressClick = useRef(false)
 
   // --- Auth & Data Fetching ---
   useEffect(() => {
@@ -184,15 +282,6 @@ const App = () => {
     )
   }, [user])
 
-  // --- Projection ---
-  const project = (coords: number[]) => {
-    const lon = coords[0]
-    const lat = coords[1]
-    const x = (lon + 180) * (800 / 360)
-    const y = (90 - lat) * (400 / 180)
-    return [x, y]
-  }
-
   const pathData = useMemo<PathDatum[]>(() => {
     if (!geoData || !geoData.features) return []
     return geoData.features.flatMap((feature) => {
@@ -205,8 +294,8 @@ const App = () => {
       if (!d) return []
       return [
         {
-          id: feature.properties.ISO_A3 || feature.properties.name || 'unknown',
-          name: feature.properties.ADMIN || feature.properties.name || 'Unknown',
+          id: getCountryId(feature.properties),
+          name: getJapaneseName(feature.properties),
           d,
         },
       ]
@@ -231,7 +320,17 @@ const App = () => {
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     lastCenter.current = getCenter(pointers.current)
     if (pointers.current.size === 2) lastDist.current = getDist(pointers.current)
-    e.currentTarget.setPointerCapture(e.pointerId)
+    if (pointers.current.size === 1) {
+      dragState.current = { start: { x: e.clientX, y: e.clientY }, moved: false }
+    } else {
+      dragState.current.moved = true
+    }
+    const target = e.target as Element | null
+    if (target?.setPointerCapture) {
+      target.setPointerCapture(e.pointerId)
+    } else {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    }
   }
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -242,8 +341,14 @@ const App = () => {
     if (pointers.current.size === 1) {
       const dx = center.x - lastCenter.current.x
       const dy = center.y - lastCenter.current.y
+      const start = dragState.current.start
+      if (start && !dragState.current.moved) {
+        const movedDist = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+        if (movedDist > 6) dragState.current.moved = true
+      }
       setTransform((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
     } else if (pointers.current.size === 2) {
+      dragState.current.moved = true
       const dist = getDist(pointers.current)
       if (lastDist.current > 0 && mapRef.current) {
         const rect = mapRef.current.getBoundingClientRect()
@@ -267,23 +372,53 @@ const App = () => {
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId)
+    if (dragState.current.moved) {
+      suppressClick.current = true
+    }
     if (pointers.current.size === 1) lastCenter.current = getCenter(pointers.current)
-    if (pointers.current.size === 0) lastCenter.current = null
+    if (pointers.current.size === 0) {
+      lastCenter.current = null
+      dragState.current = { start: null, moved: false }
+    } else if (pointers.current.size === 1) {
+      dragState.current = { start: getCenter(pointers.current), moved: false }
+    }
+  }
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!mapRef.current) return
+    e.preventDefault()
+    const rect = mapRef.current.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+    const zoomFactor = Math.exp(-e.deltaY * 0.001)
+    setTransform((prev) => {
+      const nextScale = Math.max(1, Math.min(20, prev.scale * zoomFactor))
+      const s = nextScale / prev.scale
+      return {
+        scale: nextScale,
+        x: cx - (cx - prev.x) * s,
+        y: cy - (cy - prev.y) * s,
+      }
+    })
   }
 
   const resetView = () => setTransform({ x: 0, y: 0, scale: 1 })
 
   // --- Quiz Logic ---
-  const generateAIHint = useCallback(async (countryName: string) => {
+  const generateAIHint = useCallback(async (feature: GeoFeature) => {
     setLoading(true)
     setHint(null)
-    const systemPrompt = `地理専門家として国名を隠してヒントを生成。
-    1.隣国との歴史(戦争/同盟) 2.文化(食/宗教) 3.地形。
+    const countryName = getEnglishName(feature.properties)
+    const systemPrompt = `地理専門家として国名を明記した解説を生成。
+    国名は必ず本文に含め、伏せない。
+    緯度経度の数値や方位（北緯/南緯/東経/西経）には触れない。
+    下記から最低2種類を必ず入れる:
+    1.隣国との歴史(戦争/同盟) 2.文化(食/宗教/言語) 3.地形/気候。
     JSONのみ: {"main_hint": "解説", "summary": "キャッチ"}`
 
     try {
       if (!apiKey) {
-        setHint({ main_hint: '周辺国との歴史が深い国です。', summary: '謎の国' })
+        setHint(buildFallbackHint(feature))
         return
       }
       const res = await fetch(
@@ -302,10 +437,17 @@ const App = () => {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
       }
       const text = result.candidates?.[0]?.content?.parts?.[0]?.text
-      if (text) setHint(JSON.parse(text) as Hint)
+      if (text) {
+        const parsed = JSON.parse(text) as Hint
+        if (isCoordinateHint(parsed.main_hint) || isCoordinateHint(parsed.summary)) {
+          setHint(buildFallbackHint(feature))
+        } else {
+          setHint(parsed)
+        }
+      }
     } catch (e) {
       console.error('AI hint error:', e)
-      setHint({ main_hint: '周辺国との歴史が深い国です。', summary: '謎の国' })
+      setHint(buildFallbackHint(feature))
     } finally {
       setLoading(false)
     }
@@ -318,7 +460,7 @@ const App = () => {
     setFeedback(null)
     setSelectedId(null)
     setIsHintMinimized(false)
-    generateAIHint(random.properties.ADMIN || random.properties.name || 'Unknown')
+    generateAIHint(random)
   }, [geoData, generateAIHint])
 
   useEffect(() => {
@@ -329,26 +471,80 @@ const App = () => {
 
   const handleCountryClick = (id: string, name: string) => {
     if (feedback || loading || pointers.current.size > 1 || !currentCountry) return
-    const targetId = currentCountry.properties.ISO_A3 || currentCountry.properties.name
+    if (suppressClick.current) {
+      suppressClick.current = false
+      return
+    }
+    const correctName = getJapaneseName(currentCountry.properties)
+    const targetId = getCountryId(currentCountry.properties)
     if (!targetId) return
     const isCorrect = id === targetId
 
     setSelectedId(id)
     setFeedback({
       isCorrect,
-      message: isCorrect ? '正解！' : `違います。そこは「${name}」です。`,
+      message: isCorrect
+        ? '正解！'
+        : `違います。そこは「${name}」です。正解は「${correctName}」です。`,
     })
 
     if (isCorrect) setScore((prev) => prev + 10)
     if (user) {
       addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'quiz_history'), {
-        countryName: currentCountry.properties.ADMIN || currentCountry.properties.name,
+        countryName: correctName,
         isCorrect,
         hintText: hint?.main_hint || '',
         timestamp: new Date().toISOString(),
       }).catch((err) => console.error('Error saving history:', err))
     }
   }
+
+  useEffect(() => {
+    if (!feedback || !currentCountry || !mapRef.current) return
+    const targetId = getCountryId(currentCountry.properties)
+    const raf = requestAnimationFrame(() => {
+      const svg = mapRef.current?.querySelector('svg')
+      if (!svg) return
+      const path = svg.querySelector(`path[data-country-id="${targetId}"]`) as SVGGraphicsElement | null
+      let bounds = null as { minX: number; maxX: number; minY: number; maxY: number } | null
+      if (path) {
+        const bbox = path.getBBox()
+        bounds = {
+          minX: bbox.x,
+          maxX: bbox.x + bbox.width,
+          minY: bbox.y,
+          maxY: bbox.y + bbox.height,
+        }
+      } else {
+        bounds = getProjectedBounds(currentCountry)
+      }
+      if (!bounds) return
+      const viewWidth = svg.viewBox.baseVal.width || MAP_WIDTH
+      const viewHeight = svg.viewBox.baseVal.height || MAP_HEIGHT
+      const containerWidth = mapRef.current?.clientWidth ?? 0
+      const containerHeight = mapRef.current?.clientHeight ?? 0
+      if (!containerWidth || !containerHeight) return
+      const baseScale = Math.min(containerWidth / viewWidth, containerHeight / viewHeight)
+      const offsetX = (containerWidth - viewWidth * baseScale) / 2
+      const offsetY = (containerHeight - viewHeight * baseScale) / 2
+      const padding = 40
+      const width = Math.max(1, bounds.maxX - bounds.minX)
+      const height = Math.max(1, bounds.maxY - bounds.minY)
+      const scaleX = (containerWidth - padding * 2) / (width * baseScale)
+      const scaleY = (containerHeight - padding * 2) / (height * baseScale)
+      const nextScale = Math.max(1, Math.min(20, Math.min(scaleX, scaleY)))
+      const centerX = (bounds.minX + bounds.maxX) / 2
+      const centerY = (bounds.minY + bounds.maxY) / 2
+      const centerCssX = offsetX + centerX * baseScale
+      const centerCssY = offsetY + centerY * baseScale
+      setTransform({
+        scale: nextScale,
+        x: containerWidth / 2 - centerCssX * nextScale,
+        y: containerHeight / 2 - centerCssY * nextScale,
+      })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [feedback, currentCountry, pathData])
 
   return (
     <div className="fixed inset-0 bg-white text-slate-900 font-sans overflow-hidden select-none touch-none">
@@ -360,6 +556,7 @@ const App = () => {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onWheel={handleWheel}
       >
         <div
           className="w-full h-full origin-top-left"
@@ -371,13 +568,13 @@ const App = () => {
           <svg viewBox="0 0 800 400" className="w-full h-full drop-shadow-sm">
             <rect x="-1000" y="-1000" width="3000" height="3000" fill="#e0f2fe" />
             {pathData.map((path) => {
-              const targetId = currentCountry?.properties.ISO_A3 || currentCountry?.properties.name
+              const targetId = currentCountry ? getCountryId(currentCountry.properties) : undefined
               const isTarget = path.id === targetId
               const isSelected = path.id === selectedId
 
               let fill = '#ffffff'
-              let stroke = '#e2e8f0'
-              let strokeWidth = 0.5 / transform.scale
+              const stroke = '#e2e8f0'
+              const strokeWidth = 0.5 / transform.scale
 
               if (feedback) {
                 if (isTarget) fill = '#22c55e'
@@ -390,6 +587,7 @@ const App = () => {
                 <path
                   key={path.id}
                   d={path.d}
+                  data-country-id={path.id}
                   fill={fill}
                   stroke={stroke}
                   strokeWidth={strokeWidth}
@@ -408,7 +606,11 @@ const App = () => {
       {/* Overlay: Navigation */}
       <div className="absolute top-0 left-0 right-0 p-4 pointer-events-none flex justify-between items-start z-20">
         <div className="pointer-events-auto bg-white/80 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-xl border border-white/50 flex items-center gap-3">
-          <button onClick={() => setView('start')} className="p-1 hover:bg-slate-100 rounded-lg">
+          <button
+            onClick={() => setView('start')}
+            className="p-1 hover:bg-slate-100 rounded-lg"
+            aria-label="Open menu"
+          >
             <Menu size={20} className="text-slate-600" />
           </button>
           <div className="h-4 w-px bg-slate-200" />
@@ -420,6 +622,7 @@ const App = () => {
         <button
           onClick={resetView}
           className="pointer-events-auto bg-white/80 backdrop-blur-xl p-3 rounded-2xl shadow-xl border border-white/50 text-slate-600 active:scale-90 transition-transform"
+          aria-label="Reset map view"
         >
           <Maximize size={20} />
         </button>
@@ -448,7 +651,7 @@ const App = () => {
               )}
             </div>
 
-            <div className="p-6">
+            <div className="p-6 select-text touch-auto">
               {loading ? (
                 <div className="py-8 flex flex-col items-center gap-4">
                   <Loader2 className="animate-spin text-blue-600" size={32} />
@@ -478,14 +681,17 @@ const App = () => {
                 </div>
               ) : (
                 <div className="space-y-4 animate-in fade-in duration-500">
-                  <div className="bg-blue-600 text-white p-2 px-4 rounded-xl inline-block shadow-lg">
+                  <div className="bg-blue-600 text-white p-2 px-4 rounded-xl inline-block shadow-lg select-text">
                     <p className="font-black italic text-xs">"{hint?.summary || '...'}"</p>
                   </div>
+                  <p className="text-xs text-slate-500 font-bold">
+                    正解国: {currentCountry ? getJapaneseName(currentCountry.properties) : '...'}
+                  </p>
                   <p className="text-slate-700 text-lg leading-tight font-bold">
                     {hint?.main_hint || 'ターゲットを探索中...'}
                   </p>
                   <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
-                    Pinch to Zoom • Drag to Move
+                    Pinch/Scroll to Zoom • Drag to Move
                   </p>
                 </div>
               )}
@@ -530,7 +736,11 @@ const App = () => {
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
                 <div className="flex justify-between items-center sticky top-0 bg-white py-2 z-10">
                   <h2 className="text-2xl font-black tracking-tight">LEARNING LOG</h2>
-                  <button onClick={() => setView('start')} className="p-2 bg-slate-100 rounded-full">
+                  <button
+                    onClick={() => setView('start')}
+                    className="p-2 bg-slate-100 rounded-full"
+                    aria-label="Close log"
+                  >
                     <X size={20} />
                   </button>
                 </div>

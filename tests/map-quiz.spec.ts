@@ -65,11 +65,11 @@ test('start game and answer correctly', async ({ page }) => {
   await page.getByRole('button', { name: /start game/i }).click()
 
   await expect(page.getByText(/region data analysis/i)).toBeVisible()
-  await expect(page.getByText(/謎の国/)).toBeVisible()
+  await expect(page.getByText(/Pinch\/Scroll to Zoom/i)).toBeVisible()
 
   const paths = page.locator('svg[viewBox="0 0 800 400"] path')
   await expect(paths).toHaveCount(1)
-  await paths.first().dispatchEvent('click')
+  await paths.first().click()
 
   await expect(page.getByText('SUCCESS')).toBeVisible()
   await expect(page.getByText('正解！')).toBeVisible()
