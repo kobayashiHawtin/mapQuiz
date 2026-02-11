@@ -409,12 +409,10 @@ const App = () => {
     setLoading(true)
     setHint(null)
     const countryName = getEnglishName(feature.properties)
-    const systemPrompt = `地理専門家として国名を明記した解説を生成。
-    国名は必ず本文に含め、伏せない。
-    緯度経度の数値や方位（北緯/南緯/東経/西経）には触れない。
-    下記から最低2種類を必ず入れる:
-    1.隣国との歴史(戦争/同盟) 2.文化(食/宗教/言語) 3.地形/気候。
-    JSONのみ: {"main_hint": "解説", "summary": "キャッチ"}`
+    const systemPrompt = `地理専門家として、指定国について簡潔な2文解説を生成。
+    国名は必ず含める。緯度経度に触れない。
+    歴史・文化・地形から1～2項目で、100文字以内。
+    JSONのみ: {"main_hint": "簡潔な解説", "summary": "短いキャッチ"}` 
 
     try {
       if (!apiKey) {
@@ -680,18 +678,18 @@ const App = () => {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-4 animate-in fade-in duration-500">
-                  <div className="bg-blue-600 text-white p-2 px-4 rounded-xl inline-block shadow-lg select-text">
-                    <p className="font-black italic text-xs">"{hint?.summary || '...'}"</p>
+                <div className="space-y-2 animate-in fade-in duration-500">
+                  <div className="bg-blue-600 text-white p-2 px-3 rounded-lg inline-block shadow-lg select-text">
+                    <p className="font-bold italic text-[10px]">"{hint?.summary || '...'}"</p>
                   </div>
-                  <p className="text-xs text-slate-500 font-bold">
+                  <p className="text-[11px] text-slate-500 font-bold">
                     正解国: {currentCountry ? getJapaneseName(currentCountry.properties) : '...'}
                   </p>
-                  <p className="text-slate-700 text-lg leading-tight font-bold">
+                  <p className="text-slate-700 text-sm leading-snug font-semibold max-h-24 overflow-y-auto pr-2">
                     {hint?.main_hint || 'ターゲットを探索中...'}
                   </p>
-                  <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
-                    Pinch/Scroll to Zoom • Drag to Move
+                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-wide">
+                    Pinch/Scroll • Drag
                   </p>
                 </div>
               )}
