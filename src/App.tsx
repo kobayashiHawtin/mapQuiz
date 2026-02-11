@@ -244,9 +244,76 @@ const App = () => {
         const res = await fetch(GEO_DATA_URL)
         if (!res.ok) throw new Error('地図データの取得に失敗しました')
         const data = (await res.json()) as RawGeoCollection
+        
+        // 除外リスト: 係争地域・非独立国・海外領土
+        const excludeList = new Set([
+          // 係争地域
+          'Scarborough Reef',
+          'Spratly Islands', 
+          'Paracel Islands',
+          'Siachen Glacier',
+          // 海外領土・従属地域
+          'Saint Helena',
+          'Ascension Island',
+          'Tristan da Cunha',
+          'Greenland',
+          'Faroe Islands',
+          'French Guiana',
+          'Guadeloupe',
+          'Martinique',
+          'Réunion',
+          'Mayotte',
+          'Saint Pierre and Miquelon',
+          'New Caledonia',
+          'French Polynesia',
+          'Wallis and Futuna',
+          'Puerto Rico',
+          'U.S. Virgin Islands',
+          'American Samoa',
+          'Guam',
+          'Northern Mariana Islands',
+          'Gibraltar',
+          'Falkland Islands',
+          'Bermuda',
+          'Cayman Islands',
+          'British Virgin Islands',
+          'Turks and Caicos Islands',
+          'Anguilla',
+          'Montserrat',
+          'Pitcairn Islands',
+          'Aruba',
+          'Curaçao',
+          'Sint Maarten',
+          'Caribbean Netherlands',
+          'Cook Islands',
+          'Niue',
+          'Tokelau',
+          'Hong Kong',
+          'Macao',
+          'Indian Ocean Territories',
+          'Ashmore and Cartier Islands',
+          'Coral Sea Islands',
+          'Christmas Island',
+          'Cocos Islands',
+          'Norfolk Island',
+          'Heard Island and McDonald Islands',
+          'Svalbard',
+          'Jan Mayen',
+          'Bouvet Island',
+          'Akrotiri',
+          'Dhekelia',
+        ])
+        
         const valid = (data.features ?? [])
           .map((feature): GeoFeature | null => {
             if (!isGeometrySupported(feature.geometry) || !hasName(feature.properties)) return null
+            
+            const name = feature.properties?.ADMIN || feature.properties?.name || ''
+            const iso3 = feature.properties?.ISO_A3 || feature.properties?.['ISO3166-1-Alpha-3'] || ''
+            
+            // 除外リストに含まれる or ISO_A3が無効 ("-99"など)
+            if (excludeList.has(name) || iso3 === '-99' || iso3 === '-1') return null
+            
             return {
               type: 'Feature',
               geometry: feature.geometry,
@@ -354,14 +421,23 @@ const App = () => {
         const rect = mapRef.current.getBoundingClientRect()
         const cx = center.x - rect.left
         const cy = center.y - rect.top
+        
+        // 画面座標をSVG座標に変換
+        const svgX = (cx / rect.width) * (800 / transform.scale) + (-transform.x / transform.scale)
+        const svgY = (cy / rect.height) * (400 / transform.scale) + (-transform.y / transform.scale)
+        
         const scaleFactor = dist / lastDist.current
         setTransform((prev) => {
           const nextScale = Math.max(1, Math.min(20, prev.scale * scaleFactor))
-          const s = nextScale / prev.scale
+          
+          // SVG座標を保持
+          const newX = -(svgX - (cx / rect.width) * (800 / nextScale)) * nextScale
+          const newY = -(svgY - (cy / rect.height) * (400 / nextScale)) * nextScale
+          
           return {
             scale: nextScale,
-            x: cx - (cx - prev.x) * s,
-            y: cy - (cy - prev.y) * s,
+            x: newX,
+            y: newY,
           }
         })
       }
@@ -390,14 +466,23 @@ const App = () => {
     const rect = mapRef.current.getBoundingClientRect()
     const cx = e.clientX - rect.left
     const cy = e.clientY - rect.top
+    
+    // 画面座標をSVG座標に変換
+    const svgX = (cx / rect.width) * (800 / transform.scale) + (-transform.x / transform.scale)
+    const svgY = (cy / rect.height) * (400 / transform.scale) + (-transform.y / transform.scale)
+    
     const zoomFactor = Math.exp(-e.deltaY * 0.001)
     setTransform((prev) => {
       const nextScale = Math.max(1, Math.min(20, prev.scale * zoomFactor))
-      const s = nextScale / prev.scale
+      
+      // SVG座標を保持したまま、新しいtransformを計算
+      const newX = -(svgX - (cx / rect.width) * (800 / nextScale)) * nextScale
+      const newY = -(svgY - (cy / rect.height) * (400 / nextScale)) * nextScale
+      
       return {
         scale: nextScale,
-        x: cx - (cx - prev.x) * s,
-        y: cy - (cy - prev.y) * s,
+        x: newX,
+        y: newY,
       }
     })
   }
@@ -556,15 +641,12 @@ const App = () => {
         onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
       >
-        <div
-          className="w-full h-full origin-top-left will-change-transform"
-          style={{
-            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-            transition: pointers.current.size === 0 ? 'transform 0.2s ease-out' : 'none',
-          }}
+        <svg
+          viewBox={`${-transform.x / transform.scale} ${-transform.y / transform.scale} ${800 / transform.scale} ${400 / transform.scale}`}
+          className="w-full h-full drop-shadow-sm"
+          shapeRendering="crispEdges"
         >
-          <svg viewBox="0 0 800 400" className="w-full h-full drop-shadow-sm" shapeRendering="geometricPrecision">
-            <rect x="-1000" y="-1000" width="3000" height="3000" fill="#d4e9f7" />
+          <rect x="-1000" y="-1000" width="3000" height="3000" fill="#d4e9f7" />
             {pathData.map((path) => {
               const targetId = currentCountry ? getCountryId(currentCountry.properties) : undefined
               const isTarget = path.id === targetId
@@ -587,8 +669,7 @@ const App = () => {
                   data-country-id={path.id}
                   fill={fill}
                   stroke={stroke}
-                  strokeWidth={0.5}
-                  vectorEffect="non-scaling-stroke"
+                  strokeWidth={0.5 / transform.scale}
                   className="cursor-pointer"
                   style={{ transition: 'fill 0.15s ease-out' }}
                   onClick={(e) => {
@@ -599,7 +680,6 @@ const App = () => {
               )
             })}
           </svg>
-        </div>
       </div>
 
       {/* Overlay: Navigation */}
