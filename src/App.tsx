@@ -568,7 +568,7 @@ const App = () => {
       isCorrect,
       message: isCorrect
         ? '正解！'
-        : `違います。そこは「${name}」です。正解は「${correctName}」です。`,
+        : `違います。そこは「${name}」です。正解の「${correctName}」はここでした。`,
     })
 
     if (isCorrect) setScore((prev) => prev + 10)
@@ -602,28 +602,35 @@ const App = () => {
         bounds = getProjectedBounds(currentCountry)
       }
       if (!bounds) return
-      const viewWidth = svg.viewBox.baseVal.width || MAP_WIDTH
-      const viewHeight = svg.viewBox.baseVal.height || MAP_HEIGHT
+      
+      // viewBox方式での計算
       const containerWidth = mapRef.current?.clientWidth ?? 0
       const containerHeight = mapRef.current?.clientHeight ?? 0
       if (!containerWidth || !containerHeight) return
-      const baseScale = Math.min(containerWidth / viewWidth, containerHeight / viewHeight)
-      const offsetX = (containerWidth - viewWidth * baseScale) / 2
-      const offsetY = (containerHeight - viewHeight * baseScale) / 2
+      
       const padding = 40
       const width = Math.max(1, bounds.maxX - bounds.minX)
       const height = Math.max(1, bounds.maxY - bounds.minY)
-      const scaleX = (containerWidth - padding * 2) / (width * baseScale)
-      const scaleY = (containerHeight - padding * 2) / (height * baseScale)
-      const nextScale = Math.max(1, Math.min(20, Math.min(scaleX, scaleY)))
+      
+      // 国の中心をSVG座標で計算
       const centerX = (bounds.minX + bounds.maxX) / 2
       const centerY = (bounds.minY + bounds.maxY) / 2
-      const centerCssX = offsetX + centerX * baseScale
-      const centerCssY = offsetY + centerY * baseScale
+      
+      // パディングを考慮したスケール計算
+      const scaleX = 800 / (width + padding * 2 / containerWidth * 800)
+      const scaleY = 400 / (height + padding * 2 / containerHeight * 400)
+      const nextScale = Math.max(1, Math.min(20, Math.min(scaleX, scaleY)))
+      
+      // 新しいviewBoxの中心を計算
+      const newViewWidth = 800 / nextScale
+      const newViewHeight = 400 / nextScale
+      const newX = -(centerX - newViewWidth / 2) * nextScale
+      const newY = -(centerY - newViewHeight / 2) * nextScale
+      
       setTransform({
         scale: nextScale,
-        x: containerWidth / 2 - centerCssX * nextScale,
-        y: containerHeight / 2 - centerCssY * nextScale,
+        x: newX,
+        y: newY,
       })
     })
     return () => cancelAnimationFrame(raf)
@@ -720,8 +727,8 @@ const App = () => {
               onClick={() => !feedback && setIsHintMinimized(!isHintMinimized)}
             >
               <div className="flex items-center gap-2 text-blue-600">
-                <Target size={18} />
-                <span className="text-[10px] font-black uppercase tracking-widest">Region Data Analysis</span>
+                <Target size={16} />
+                <span className="text-xs font-bold">ヒント</span>
               </div>
               {!feedback && (
                 <ChevronRight
@@ -730,7 +737,7 @@ const App = () => {
               )}
             </div>
 
-            <div className="p-6 select-text touch-auto">
+            <div className="p-4 select-text touch-auto">
               {loading ? (
                 <div className="py-8 flex flex-col items-center gap-4">
                   <Loader2 className="animate-spin text-blue-600" size={32} />
@@ -760,17 +767,8 @@ const App = () => {
                 </div>
               ) : (
                 <div className="space-y-2 animate-in fade-in duration-500">
-                  <div className="bg-blue-600 text-white p-2 px-3 rounded-lg inline-block shadow-lg select-text">
-                    <p className="font-bold italic text-[10px]">"{hint?.summary || '...'}"</p>
-                  </div>
-                  <p className="text-[11px] text-slate-500 font-bold">
-                    正解国: {currentCountry ? getJapaneseName(currentCountry.properties) : '...'}
-                  </p>
-                  <p className="text-slate-700 text-sm leading-snug font-semibold max-h-24 overflow-y-auto pr-2">
+                  <p className="text-slate-700 text-sm leading-snug font-semibold max-h-32 overflow-y-auto pr-2">
                     {hint?.main_hint || 'ターゲットを探索中...'}
-                  </p>
-                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-wide">
-                    Pinch/Scroll • Drag
                   </p>
                 </div>
               )}
