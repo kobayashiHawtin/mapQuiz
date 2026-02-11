@@ -203,7 +203,8 @@ const App = () => {
   const [isHintMinimized, setIsHintMinimized] = useState(false)
 
   // --- Map State ---
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1.5 })
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const mapRef = useRef<HTMLDivElement | null>(null)
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
   const lastCenter = useRef<{ x: number; y: number } | null>(null)
@@ -428,7 +429,7 @@ const App = () => {
         
         const scaleFactor = dist / lastDist.current
         setTransform((prev) => {
-          const nextScale = Math.max(1, Math.min(20, prev.scale * scaleFactor))
+          const nextScale = Math.max(1.5, Math.min(20, prev.scale * scaleFactor))
           
           // SVG座標を保持
           const newX = -(svgX - (cx / rect.width) * (800 / nextScale)) * nextScale
@@ -471,9 +472,9 @@ const App = () => {
     const svgX = (cx / rect.width) * (800 / transform.scale) + (-transform.x / transform.scale)
     const svgY = (cy / rect.height) * (400 / transform.scale) + (-transform.y / transform.scale)
     
-    const zoomFactor = Math.exp(-e.deltaY * 0.003)
+    const zoomFactor = Math.exp(-e.deltaY * 0.008)
     setTransform((prev) => {
-      const nextScale = Math.max(1, Math.min(20, prev.scale * zoomFactor))
+      const nextScale = Math.max(1.5, Math.min(20, prev.scale * zoomFactor))
       
       // SVG座標を保持したまま、新しいtransformを計算
       const newX = -(svgX - (cx / rect.width) * (800 / nextScale)) * nextScale
@@ -487,7 +488,7 @@ const App = () => {
     })
   }
 
-  const resetView = () => setTransform({ x: 0, y: 0, scale: 1 })
+  const resetView = () => setTransform({ x: 0, y: 0, scale: 1.5 })
 
   // --- Quiz Logic ---
   const generateAIHint = useCallback(async (feature: GeoFeature) => {
@@ -619,7 +620,7 @@ const App = () => {
       // パディングを考慮したスケール計算
       const scaleX = 800 / (width + padding * 2 / containerWidth * 800)
       const scaleY = 400 / (height + padding * 2 / containerHeight * 400)
-      const nextScale = Math.max(1, Math.min(20, Math.min(scaleX, scaleY)))
+      const nextScale = Math.max(1.5, Math.min(20, Math.min(scaleX, scaleY)))
       
       // 新しいviewBoxの中心を計算
       const newViewWidth = 800 / nextScale
@@ -658,15 +659,19 @@ const App = () => {
               const targetId = currentCountry ? getCountryId(currentCountry.properties) : undefined
               const isTarget = path.id === targetId
               const isSelected = path.id === selectedId
+              const isHovered = path.id === hoveredId
 
               let fill = '#f0f4f8'
-              const stroke = '#cbd5e1'
+              let stroke = '#94a3b8'
 
               if (feedback) {
                 if (isTarget) fill = '#22c55e'
                 else if (isSelected) fill = '#ef4444'
               } else if (isSelected) {
                 fill = '#3b82f6'
+              } else if (isHovered) {
+                fill = '#e0f2fe'
+                stroke = '#0ea5e9'
               }
 
               return (
@@ -676,9 +681,11 @@ const App = () => {
                   data-country-id={path.id}
                   fill={fill}
                   stroke={stroke}
-                  strokeWidth={1.2 / transform.scale}
+                  strokeWidth={1.5 / transform.scale}
                   className="cursor-pointer"
-                  style={{ transition: 'fill 0.15s ease-out' }}
+                  style={{ transition: 'fill 0.15s ease-out, stroke 0.15s ease-out' }}
+                  onPointerEnter={() => !feedback && setHoveredId(path.id)}
+                  onPointerLeave={() => setHoveredId(null)}
                   onClick={(e) => {
                     e.stopPropagation()
                     handleCountryClick(path.id, path.name)
