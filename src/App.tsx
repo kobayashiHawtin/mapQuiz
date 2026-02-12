@@ -408,7 +408,11 @@ const App = () => {
     const svgX = (cx / rect.width) * (800 / transform.scale) + (-transform.x / transform.scale)
     const svgY = (cy / rect.height) * (400 / transform.scale) + (-transform.y / transform.scale)
     
-    const zoomFactor = Math.exp(-e.deltaY * 0.02)
+    // デバイス判定: タッチデバイスかPCか
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
+    const sensitivity = isTouchDevice ? 0.012 : 0.005
+    
+    const zoomFactor = Math.exp(-e.deltaY * sensitivity)
     setTransform((prev) => {
       const nextScale = Math.max(1.5, Math.min(20, prev.scale * zoomFactor))
       
