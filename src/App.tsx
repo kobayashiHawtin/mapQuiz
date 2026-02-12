@@ -338,7 +338,7 @@ const App = () => {
   }
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointers.current.has(e.pointerId) || !lastCenter.current) return
+    if (!pointers.current.has(e.pointerId) || !lastCenter.current || !mapRef.current) return
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const center = getCenter(pointers.current)
 
@@ -350,7 +350,13 @@ const App = () => {
         const movedDist = Math.hypot(e.clientX - start.x, e.clientY - start.y)
         if (movedDist > 6) dragState.current.moved = true
       }
-      setTransform((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+      
+      // viewBox方式では、画面座標の移動量をスケールに応じて変換
+      const rect = mapRef.current.getBoundingClientRect()
+      const svgDx = (dx / rect.width) * (800 / transform.scale) * transform.scale
+      const svgDy = (dy / rect.height) * (400 / transform.scale) * transform.scale
+      
+      setTransform((prev) => ({ ...prev, x: prev.x + svgDx, y: prev.y + svgDy }))
     } else if (pointers.current.size === 2) {
       dragState.current.moved = true
       const dist = getDist(pointers.current)
