@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Map as MapIcon,
   Award,
-  BookOpen,
   RefreshCw,
   ChevronRight,
   Loader2,
@@ -10,18 +9,8 @@ import {
   XCircle,
   Maximize,
   Menu,
-  X,
   Target,
 } from 'lucide-react'
-import { initializeApp, type FirebaseOptions } from 'firebase/app'
-import {
-  getAuth,
-  signInAnonymously,
-  onAuthStateChanged,
-  signInWithCustomToken,
-  type User,
-} from 'firebase/auth'
-import { getFirestore, collection, addDoc, onSnapshot } from 'firebase/firestore'
 
 type Geometry =
   | { type: 'Polygon'; coordinates: number[][][] }
@@ -65,14 +54,6 @@ type Hint = {
 type Feedback = {
   isCorrect: boolean
   message: string
-}
-
-type QuizHistoryItem = {
-  id: string
-  countryName: string
-  isCorrect: boolean
-  hintText: string
-  timestamp: string
 }
 
 type PathDatum = {
@@ -173,24 +154,17 @@ const getProjectedBounds = (feature: GeoFeature) => {
 }
 
 // --- Configuration ---
-const firebaseConfig = JSON.parse(__firebase_config) as FirebaseOptions
-const app = initializeApp(firebaseConfig)
-const auth = getAuth(app)
-const db = getFirestore(app)
-const appId = __app_id ?? 'world-quiz-smooth'
 // .env 設定方法:
 // 1) プロジェクト直下に .env を作成
 // 2) VITE_GEMINI_API_KEY=あなたのAPIキー を追加
 // 3) 開発サーバー/ビルドを再起動
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY ?? ''
-const hasValidFirebaseKey = Boolean(firebaseConfig?.apiKey) && firebaseConfig.apiKey !== 'demo-key'
 const MODEL_NAME = 'gemini-2.5-flash-lite'
 const GEO_DATA_URL =
   'https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson'
 
 const App = () => {
-  const [user, setUser] = useState<User | null>(null)
-  const [view, setView] = useState<'start' | 'quiz' | 'review'>('start')
+  const [view, setView] = useState<'start' | 'quiz'>('start')
   const [geoData, setGeoData] = useState<GeoCollection | null>(null)
   const [currentCountry, setCurrentCountry] = useState<GeoFeature | null>(null)
   const [hint, setHint] = useState<Hint | null>(null)
@@ -199,7 +173,6 @@ const App = () => {
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [score, setScore] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [history, setHistory] = useState<QuizHistoryItem[]>([])
   const [isHintMinimized, setIsHintMinimized] = useState(false)
 
   // --- Map State ---
@@ -215,28 +188,7 @@ const App = () => {
   })
   const suppressClick = useRef(false)
 
-  // --- Auth & Data Fetching ---
-  useEffect(() => {
-    if (!hasValidFirebaseKey) {
-      setUser(null)
-      return
-    }
-    const initAuth = async () => {
-      try {
-        if (__initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token)
-        } else {
-          await signInAnonymously(auth)
-        }
-      } catch (err) {
-        console.error('Auth error:', err)
-      }
-    }
-    initAuth()
-    const unsubscribe = onAuthStateChanged(auth, setUser)
-    return () => unsubscribe()
-  }, [])
-
+  // --- Data Fetching ---
   useEffect(() => {
     const fetchGeoData = async () => {
       setLoading(true)
@@ -333,22 +285,6 @@ const App = () => {
     }
     fetchGeoData()
   }, [])
-
-  useEffect(() => {
-    if (!user) return
-    const q = collection(db, 'artifacts', appId, 'users', user.uid, 'quiz_history')
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const docs = snapshot.docs.map((doc) => {
-          const data = doc.data() as Omit<QuizHistoryItem, 'id'>
-          return { id: doc.id, ...data }
-        })
-        setHistory(docs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()))
-      },
-      (err) => console.error('Firestore error:', err),
-    )
-  }, [user])
 
   const pathData = useMemo<PathDatum[]>(() => {
     if (!geoData || !geoData.features) return []
@@ -472,7 +408,7 @@ const App = () => {
     const svgX = (cx / rect.width) * (800 / transform.scale) + (-transform.x / transform.scale)
     const svgY = (cy / rect.height) * (400 / transform.scale) + (-transform.y / transform.scale)
     
-    const zoomFactor = Math.exp(-e.deltaY * 0.008)
+    const zoomFactor = Math.exp(-e.deltaY * 0.02)
     setTransform((prev) => {
       const nextScale = Math.max(1.5, Math.min(20, prev.scale * zoomFactor))
       
@@ -573,14 +509,6 @@ const App = () => {
     })
 
     if (isCorrect) setScore((prev) => prev + 10)
-    if (user) {
-      addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'quiz_history'), {
-        countryName: correctName,
-        isCorrect,
-        hintText: hint?.main_hint || '',
-        timestamp: new Date().toISOString(),
-      }).catch((err) => console.error('Error saving history:', err))
-    }
   }
 
   useEffect(() => {
@@ -798,57 +726,15 @@ const App = () => {
               <p className="text-slate-500 font-bold">AI Historical Geography Quiz</p>
             </div>
             {view === 'start' && (
-              <div className="flex flex-col gap-4">
-                <button
-                  onClick={() => {
-                    setView('quiz')
-                    startNewQuestion()
-                  }}
-                  className="w-full bg-blue-600 text-white font-black py-6 rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all text-2xl"
-                >
-                  START GAME
-                </button>
-                <button
-                  onClick={() => setView('review')}
-                  className="w-full bg-white border-2 border-slate-100 text-slate-400 font-black py-5 rounded-[2rem] hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-                >
-                  <BookOpen size={20} /> ARCHIVE
-                </button>
-              </div>
-            )}
-            {view === 'review' && (
-              <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
-                <div className="flex justify-between items-center sticky top-0 bg-white py-2 z-10">
-                  <h2 className="text-2xl font-black tracking-tight">LEARNING LOG</h2>
-                  <button
-                    onClick={() => setView('start')}
-                    className="p-2 bg-slate-100 rounded-full"
-                    aria-label="Close log"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                {history.length === 0 ? (
-                  <p className="text-slate-400 text-center py-10">NO DATA FOUND</p>
-                ) : (
-                  history.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex gap-4"
-                    >
-                      <div className={item.isCorrect ? 'text-green-500' : 'text-red-500'}>
-                        {item.isCorrect ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
-                      </div>
-                      <div>
-                        <h4 className="font-black text-slate-900 text-lg uppercase">{item.countryName}</h4>
-                        <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed line-clamp-2">
-                          {item.hintText}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+              <button
+                onClick={() => {
+                  setView('quiz')
+                  startNewQuestion()
+                }}
+                className="w-full bg-blue-600 text-white font-black py-6 rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all text-2xl"
+              >
+                START GAME
+              </button>
             )}
           </div>
         </div>
